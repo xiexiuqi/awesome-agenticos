@@ -8,13 +8,15 @@
 4. [评价指标体系](#四-评价指标体系)
 5. [AI Agent 基础设施负载特征分析](#五-ai-agent-基础设施负载特征分析)
 6. [负载选择与监测实践](#六-负载选择与监测实践)
-7. [工具与资源汇总](#七-工具与资源汇总)
+7. [参考文献](#七-参考文献)
 
 ---
 
 ## 一、SWE-bench 系列基准测试概览
 
 ### 1.1 测试体系演进
+
+软件工程（Software Engineering, SE）领域的基准测试在 2023 年后经历了快速发展。SWE-bench 作为首个面向真实代码修复任务的执行式评测框架，开创了从静态文本评测向动态执行评测转变的先河 [1]。在此之前，代码生成任务主要依赖 BLEU、CodeBLEU 等文本相似度指标，这些指标无法验证生成代码的实际可执行性。SWE-bench 通过构建 Docker 化的测试环境，要求模型生成的补丁必须通过完整的测试套件验证，从而建立了更贴近实际软件开发场景的评测范式。
 
 | 基准测试 | 年份 | 任务数量 | 核心特点 | 适用场景 |
 |---------|------|---------|---------|---------|
@@ -26,7 +28,13 @@
 | **SWE-bench Pro** | 2025 | 1,865 | 企业级复杂任务，41 个仓库 | 长时程开发 |
 | **SWE-Bench++** | 2025 | 自动扩展 | 4 层 AutoQA，环境自动合成 | 可扩展评测 |
 
+SWE-bench 的初始版本从 12 个流行的 Python 开源项目中收集了 2,294 个真实的 GitHub Issue-Pull Request 对作为测试样本 [1]。这一数据构建策略的核心假设是：真实的软件缺陷报告和对应的修复方案能够最大程度地反映实际开发场景中的问题复杂度。然而，随着大语言模型训练数据规模的急剧扩张，基准污染（Benchmark Contamination）问题日益凸显——模型可能在预训练阶段已经"见过"测试集中的 issue 和对应的修复方案，导致评测结果无法真实反映模型的泛化能力。
+
+SWE-ReBench 的提出正是为了应对这一挑战 [2]。该工作由 Nebius AI / TractoAI 的研究团队完成，其核心创新在于建立了全自动化的任务挖掘流水线，并通过时间门控机制（Temporal Decontamination）确保所有测试任务的创建时间晚于被测模型的训练截止日期。这种设计使得模型无法依赖记忆来解决问题，必须真正具备理解和推理能力。SWE-ReBench 将任务规模扩展至 21,000 个以上，覆盖数千个代码仓库，为强化学习训练提供了充足的数据支持。
+
 ### 1.2 核心评测指标
+
+SWE-bench 系列基准测试建立了一套严格的评测指标体系，其核心在于区分"语法正确的补丁"和"真正解决问题的补丁"。
 
 **主要指标：**
 
@@ -39,13 +47,18 @@
 
 **测试验证机制：**
 
-- **FAIL_TO_PASS**: 修复前失败、修复后通过的测试（验证修复有效性）
-- **PASS_TO_PASS**: 修复前后均通过的测试（验证无回归）
-- **Resolved**: 同时满足上述两项的综合指标
+SWE-bench 的测试验证分为两个层次 [1]：
+
+- **FAIL_TO_PASS**: 修复前失败、修复后通过的测试。这类测试直接验证修复的有效性——如果模型生成的补丁确实解决了报告的问题，那么原本因该问题而失败的测试用例应当通过。
+- **PASS_TO_PASS**: 修复前后均通过的测试。这类测试用于检测回归——模型在修复目标问题的同时，不应破坏已有的正确功能。
+
+只有同时满足上述两项条件的实例才被记为"Resolved"。这种双重验证机制有效降低了模型通过"碰巧"通过部分测试而获得虚高分数的可能性。
+
+然而，后续研究揭示了该机制的局限性。SWE-Bench+ 的研究发现，约 67.72% 被标记为"Resolved"的实例实际上并未真正解决问题，尽管它们通过了所有测试 [3]。这一发现暴露了测试套件本身的质量问题：弱测试用例（Weak Tests）允许模型通过部分或不完整的修复获得通过标记。例如，AutoCodeRover 配合 GPT-4o 在 SWE-bench 上报告 18.83% 的解决率，但经人工验证后真实解决率仅为 3.83% [3]。这一巨大差距提示我们，在解读 SWE-bench 结果时必须保持审慎，不能将"通过测试"等同于"正确修复"。
 
 ### 1.3 基准污染问题
 
-SWE-ReBench 提出的核心问题：
+基准污染是当前 AI Agent 评测领域面临的最严峻挑战之一。SWE-ReBench 通过系统性的对比实验揭示了这一问题严重性 [2]：
 
 | 模型 | SWE-bench | SWE-ReBench | 差距 | 分析 |
 |------|-----------|-------------|------|------|
@@ -53,9 +66,13 @@ SWE-ReBench 提出的核心问题：
 | Claude Opus 4.6 | ~80.8% | ~51.7% | ~29 个百分点 | 部分记忆依赖 |
 | DeepSeek-V3 | 一致 | 一致 | 接近 | 泛化能力真实 |
 
-> 差距大的模型更可能是记忆而非真正具备解决能力。
+上表数据揭示了一个关键规律：在两个基准上表现差距越大的模型，其 SWE-bench 成绩越可能受到训练数据记忆的污染。MiniMax M2.5 在 SWE-bench 上高达 80.2% 的解决率在 SWE-ReBench 上骤降至 39.6%，近 40 个百分点的差距强烈暗示该模型可能记忆了大量训练数据中的 issue 修复方案。相比之下，DeepSeek-V3 在两个基准上的表现基本一致，说明其具备真实的泛化能力而非依赖记忆 [2]。
+
+这一发现对负载分析工作具有重要启示：在选择评测任务时，必须优先考虑去污染的基准数据集，否则分析结果将严重偏离真实场景。对于资源消耗和性能特征的测量，使用被污染的基准可能导致对模型"真实"能力的高估，进而影响基础设施规划和资源分配决策。
 
 ### 1.4 典型运行时间参考
+
+基于 SWE-bench 官方文档和社区实践，单个测试用例的完整执行流程包括多个阶段 [1]：
 
 | 阶段 | 耗时 | 说明 |
 |------|------|------|
@@ -65,31 +82,39 @@ SWE-ReBench 提出的核心问题：
 | 测试执行 | ~1-2 分钟 | 应用 patch + 运行测试 |
 | **总计** | **~8-12 分钟/用例** | 首次运行 |
 
+值得注意的是，上述时间仅涵盖测试框架本身的执行，不包括 Agent 实际解决问题的时间。在完整的端到端评测中，Agent 可能需要数十分钟甚至数小时来探索、推理和生成修复方案。AgentCgroup 论文的测量显示，在 5-11 分钟的典型任务执行时间内，OS 级执行（容器启动、工具调用、环境初始化）占据了 56-74% 的端到端延迟，而 LLM 推理仅占 26-44% [4]。这一发现颠覆了业界普遍认为"LLM 推理是主要瓶颈"的直觉，揭示了基础设施优化在 Agent 系统中的关键作用。
+
 ---
 
 ## 二、AI Agent 观测与测试方法
 
 ### 2.1 观测层次架构
 
-```
-┌─────────────────────────────────────┐
-│  Layer 4: 业务指标层                 │  ← 输出质量、单次任务成本
-│  (自定义仪表盘)                      │
-├─────────────────────────────────────┤
-│  Layer 3: LLM 专用监控               │  ← Token 使用、延迟、每次调用成本
-│  (Langfuse, Helicone, LangSmith)    │
-├─────────────────────────────────────┤
-│  Layer 2: 基础设施监控               │  ← CPU、内存、磁盘、网络
-│  (Datadog, Grafana, eBPF+cgroup)    │     + 增强型 cgroup 指标
-├─────────────────────────────────────┤
-│  Layer 1: Agent 原生监控             │  ← 心跳、任务状态、工具调用追踪
-│  (AgentCenter, 自定义)               │     + AgentCgroup 式资源控制
-└─────────────────────────────────────┘
-```
+AI Agent 系统的观测需要覆盖从底层基础设施到高层业务逻辑的全栈层次。与传统的单体应用或微服务不同，Agent 系统的执行流程呈现出高度动态和不确定的特征：执行路径取决于 LLM 的推理结果，工具调用序列在不同运行间可能存在显著差异，资源消耗模式也随之变化。这种不确定性要求观测系统具备更强的适应性和细粒度追踪能力。
+
+当前业界普遍采用四层观测架构：
+
+**Layer 1: Agent 原生监控**
+
+这一层关注 Agent 框架内部的执行状态，包括任务生命周期、工具调用序列、中间结果和错误状态。由于 Agent 框架（如 LangChain、AutoGPT、Claude Code 等）的实现差异较大，这一层的观测通常需要框架提供特定的 Hook 或 Callback 机制。AgentCgroup 提出的资源控制方案在这一层引入了工具调用边界的概念，将资源策略与语义执行单元对齐 [4]。
+
+**Layer 2: 基础设施监控**
+
+这一层覆盖传统的操作系统和容器资源指标，包括 CPU、内存、磁盘、网络等。对于 AI Agent 工作负载，这一层需要特别关注 cgroup v2 提供的细粒度资源指标，如 `memory.current`、`memory.peak`、`cpu.stat` 等。与常规工作负载不同，Agent 任务的资源使用呈现出极端的峰均比（可达 15.4×），要求监控系统的采样频率能够捕获亚秒级的资源波动 [4]。
+
+**Layer 3: LLM 专用监控**
+
+这一层聚焦于 LLM API 调用的专项指标，包括 token 消耗、请求延迟、成本追踪、模型版本等。随着多模型策略（Router、Fallback、Ensemble）的普及，这一层还需要追踪不同模型间的切换逻辑和效果对比。Helicone、Langfuse 等工具在这一层提供了丰富的开箱即用功能 [5]。
+
+**Layer 4: 业务指标层**
+
+这一层将技术指标转化为业务价值指标，如单次任务成本、任务完成质量评分、用户满意度等。对于企业部署场景，这一层的指标直接关系到 ROI 计算和资源配置决策。
 
 ### 2.2 AgentSight：系统级可观测性框架
 
-**核心创新：** 基于 eBPF 的边界追踪（Boundary Tracing）
+AgentSight 是由 FreeBSD 项目成员 Shane Cardoz 等人提出的系统级可观测性框架，其核心目标是解决现有观测工具面临的"语义鸿沟"（Semantic Gap）问题 [6]。传统工具要么观测 Agent 的高层意图（通过 LLM prompt），要么观测底层系统动作（如系统调用），但无法将两者关联起来。这种割裂使得运维人员难以区分正常操作、恶意攻击和资源浪费行为。
+
+AgentSight 的核心创新在于基于 eBPF 的边界追踪（Boundary Tracing）技术 [6]：
 
 | 特性 | 说明 |
 |------|------|
@@ -100,14 +125,16 @@ SWE-ReBench 提出的核心问题：
 | **性能开销** | **<3%** 平均（工作流中实测 2.9%） |
 | **插桩需求** | 零插桩（框架无关） |
 
-**AgentSight 检测内容：**
+AgentSight 的技术实现依赖于 Linux 内核的 eBPF 子系统。eBPF 允许在内核空间安全地执行用户定义的程序，无需修改内核源码或加载内核模块。AgentSight 利用这一能力，在关键系统调用点（如 `execve`、`clone`、`open`）插入探针，同时通过网络栈钩子捕获 LLM API 通信流量。通过关联分析，AgentSight 能够建立从语义意图到系统动作的完整因果链。
 
-- **Prompt 注入攻击** — 检测恶意重定向
-- **资源浪费的推理循环** — Agent 陷入低效思考循环
-- **多 Agent 协调瓶颈** — 分布式系统中的隐藏延迟
-- **语义意图到系统动作的关联** — 桥接高层目标与底层操作
+AgentSight 的检测能力涵盖多个维度 [6]：
 
-**性能基准：**
+- **Prompt 注入攻击检测**：通过分析 LLM 流量中的异常模式，识别试图重定向 Agent 行为的恶意输入。
+- **资源浪费推理循环识别**：检测 Agent 陷入无意义的思考循环，如反复读取同一文件、执行相同查询等。
+- **多 Agent 协调瓶颈定位**：在分布式 Agent 系统中追踪跨节点通信延迟和同步问题。
+- **语义意图到系统动作关联**：回答"Agent 为什么执行了这个操作"的关键问题。
+
+性能方面，AgentSight 在多种工作负载下的开销控制表现出色 [6]：
 
 | 任务 | 基线 | AgentSight | 开销 |
 |------|------|-----------|------|
@@ -115,7 +142,11 @@ SWE-ReBench 提出的核心问题：
 | 代码编写 | 22.54s | 23.64s | 4.9% |
 | 仓库编译 | 92.40s | 92.72s | 0.4% |
 
-### 2.3 主流观测工具对比（2026）
+对于资源密集型任务（如仓库编译），开销低至 0.4%，这得益于 eBPF 在内核空间执行的高效性。对于 I/O 密集型任务（如代码编写），开销略高至 4.9%，但仍处于可接受范围。
+
+### 2.3 主流观测工具对比
+
+2025-2026 年间，AI Agent 观测工具市场快速成熟，形成了多层次、多角度的工具生态。不同工具在观测深度、性能开销和适用场景上存在显著差异：
 
 | 平台 | 开销 | 特点 | 适用场景 |
 |------|------|------|---------|
@@ -125,11 +156,15 @@ SWE-ReBench 提出的核心问题：
 | **Langfuse** | ~15% | 最深度的步骤级插桩 | 详细追踪需求 |
 | **AgentSight** | ~3% | 内核级语义感知 | 安全 + 性能分析 |
 
+工具选择应基于具体需求权衡。对于开发调试阶段，Langfuse 的深度追踪能力有助于快速定位问题；对于生产环境，AgentOps 的生命周期监控和 AgentSight 的安全检测能力更为重要；对于成本敏感场景，LangSmith 和 AgentSight 的低开销特性更具优势 [5][6]。
+
 ---
 
 ## 三、业界测试方法对比
 
 ### 3.1 评测框架对比
+
+AI Agent 评测框架的发展呈现出从单一任务向多环境、从静态评测向动态执行演进的趋势。不同框架针对 Agent 能力的不同维度设计了专门的评测场景：
 
 | 框架 | 评测对象 | 环境 | 核心指标 | 特点 |
 |------|---------|------|---------|------|
@@ -140,44 +175,40 @@ SWE-ReBench 提出的核心问题：
 | **Terminal-Bench** | 终端操作 | 容器 | 命令准确率 | 命令行任务 |
 | **Tau-Bench** | 多轮对话 | 模拟环境 | 用户满意度 | 对话式 Agent |
 
+SWE-bench 专注于软件工程领域的代码修复能力，其评测环境基于 Docker 容器，包含了完整的代码仓库和测试套件 [1]。WebArena 则面向 Web 交互场景，在真实的网站上执行端到端任务，评测 Agent 的网页导航、表单填写、信息检索等能力。AgentBench 提供了更为通用的评测框架，覆盖了操作系统、数据库、Web、家居控制等 8 种不同环境，旨在全面评估 Agent 的通用问题解决能力 [7]。
+
+从负载分析的角度，不同评测框架对基础设施的需求差异显著。SWE-bench 的 Docker 镜像大小在 2.9-17.3 GB 之间（中位数 3.5 GB），任务执行时间 5-11 分钟，资源消耗以内存 burst 为主要特征 [4]。WebArena 则需要稳定的网络连接和浏览器环境，其负载特征更接近传统的 Web 服务。AgentBench 的多环境特性意味着测试基础设施需要支持多种运行时和依赖库。
+
 ### 3.2 测试方法分类
 
-**按评测深度：**
+从方法论角度，AI Agent 测试可分为三个层次：
 
-| 方法 | 描述 | 优点 | 缺点 |
-|------|------|------|------|
-| **黑盒测试** | 仅观察输入输出 | 简单、快速 | 无法定位问题 |
-| **灰盒测试** | 观察工具调用序列 | 了解执行过程 | 需要 Agent 支持 |
-| **白盒测试** | 全链路追踪（eBPF） | 精确定位瓶颈 | 开销较高、复杂 |
+**黑盒测试**仅观察系统的输入输出关系，不关心内部执行过程。这种方法的优势在于简单快速，不需要 Agent 框架提供特殊的观测接口。然而，当测试失败时，黑盒测试无法提供定位问题的线索。在 SWE-bench 评测中，黑盒测试对应于仅检查最终补丁是否通过测试套件，而不分析 Agent 的中间执行步骤。
 
-**按测试场景：**
+**灰盒测试**在观察输入输出的基础上，进一步追踪工具调用序列。这种方法需要 Agent 框架记录每次工具调用的参数、返回值和耗时。通过分析工具调用序列，可以识别 Agent 的执行策略、错误模式和效率瓶颈。例如，分析 Agent 在修复 bug 时是否首先读取了相关文件、是否进行了适当的测试、是否陷入了无效的循环等。
 
-| 场景 | 方法 | 关键指标 |
-|------|------|---------|
-| 功能正确性 | 单元测试 + 集成测试 | 通过率、覆盖率 |
-| 性能基准 | 压力测试 + 负载测试 | 延迟、吞吐量、资源使用 |
-| 稳定性 | 长时间运行测试 | 错误率、恢复时间 |
-| 安全性 | 对抗测试 | 攻击成功率 |
+**白盒测试**通过全链路追踪技术（如 eBPF）捕获系统级的执行细节，包括系统调用、内核事件、资源分配等。这种方法提供了最全面的观测能力，但实施复杂度也最高。AgentSight 代表了白盒测试在 Agent 领域的应用 [6]。
 
 ### 3.3 关键研究发现
 
-**AgentCgroup 论文核心发现（144 个 SWE-rebench 任务）：**
+AgentCgroup 论文基于 144 个 SWE-rebench 任务、两种 LLM 模型（Claude Haiku 和 GLM）的系统测量，揭示了 AI Agent 工作负载的一系列反直觉特征 [4]：
 
-| 发现 | 数值 | 测试启示 |
-|------|------|---------|
-| OS 级执行占端到端延迟 | **56-74%** | 必须监控容器启动时间，不只是推理时间 |
-| 并发瓶颈 | **内存，非 CPU** | 重点监控 `memory.peak` |
-| 内存峰均比 | **15.4×** | 需要区分推理阶段和工具执行阶段 |
-| Burst 持续时间 | **1-2 秒** | 采样频率必须 >= 1Hz |
-| 同任务多次运行方差 | **1.8×** | 每个任务至少跑 3 次取统计分布 |
-| 内存变化率 | **最高 3GB/s** | 需要亚秒级监控 |
+**OS 级执行 dominates 端到端延迟**：测量结果显示，OS 级执行（包括容器启动、工具调用、环境初始化）占据了端到端任务延迟的 56-74%，而 LLM 推理仅占 26-44%。这一发现与业界普遍将优化重点放在 LLM 推理上的做法形成鲜明对比，提示基础设施优化（容器启动速度、工具执行效率）可能带来比模型优化更大的端到端性能提升。
 
-**"The Cost of Dynamic Reasoning" 论文发现：**
+**内存是并发瓶颈，而非 CPU**：在归一化到单核的测量中，Haiku 的平均 CPU 利用率仅为 13.2%，GLM 为 7.6%。与此同时，内存使用呈现出极端的波动特征：基线约 185 MB，但在工具调用期间可 burst 至 500 MB - 4 GB，峰均比高达 15.4×。这意味着在并发部署场景下，内存容量——而非 CPU 算力——是限制并发密度的主要瓶颈 [4]。
+
+**Burst-Silence 执行模式**：98.5% 的内存 burst 事件发生在工具调用期间，而工具调用仅占 50.6% 的执行时间。这种"爆发-静默"交替的执行模式与传统工作负载的持续运行特征形成鲜明对比，对资源调度策略提出了全新要求。
+
+**极端的非确定性**：同任务多次运行的资源曲线方差达 1.8×，不同任务间的峰值内存差异可达 20×。这种高度不可预测性使得基于历史数据的预测模型难以奏效，要求资源管理系统具备实时适应能力 [4]。
+
+"The Cost of Dynamic Reasoning" 论文从另一个角度揭示了 Agent 系统的资源代价 [8]：
 
 | Agent 类型 | 相比单轮 LLM 延迟 | 相比单轮 LLM 能耗 |
 |-----------|------------------|------------------|
 | Reflexion (8B) | **153.7× 更慢** | **130.9× 更高** |
 | LATS (8B) | **90.1× 更慢** | **17.7× 更高** |
+
+Reflexion 和 LATS 是两种典型的多轮推理 Agent 架构，通过自我反思和搜索来改进输出质量。然而，这种质量提升伴随着巨大的资源代价：Reflexion 的延迟是单轮 LLM 的 153.7 倍，能耗是 130.9 倍 [8]。这一数据对于负载分析和容量规划具有重要参考价值——在评估 Agent 系统的可行性时，必须将多轮推理的资源开销纳入总体成本计算。
 
 ---
 
@@ -185,57 +216,49 @@ SWE-ReBench 提出的核心问题：
 
 ### 4.1 功能指标
 
-| 指标 | 定义 | 测量方法 |
-|------|------|---------|
-| **任务成功率** | 成功完成任务的比例 | 自动化测试验证 |
-| **步骤准确率** | 每个工具调用的正确率 | 与 gold trace 对比 |
-| **代码质量** | 生成代码的可维护性 | 静态分析工具 |
-| **回归率** | 引入新问题的比例 | PASS_TO_PASS 测试 |
+功能指标评估 Agent 完成任务的正确性和质量。在 SWE-bench 系列基准中，功能正确性通过自动化测试验证，但正如前文所述，测试通过并不等同于问题真正解决 [3]。
+
+**任务成功率**（Task Success Rate）是最基础的功能指标，定义为成功完成任务的实例占总实例的比例。在 SWE-bench 中，这对应于 % Resolved 指标。然而，考虑到测试套件的不完善性，建议将任务成功率与人工验证样本相结合，以获得更可靠的估计。
+
+**步骤准确率**（Step Accuracy）衡量 Agent 执行过程中每个中间步骤的正确性。这需要与"黄金轨迹"（Gold Trace）对比，即专家或已知正确解的执行路径。步骤准确率对于诊断 Agent 的失败模式尤为重要：Agent 是在早期就走错了方向，还是在最后一步出现了失误？
+
+**回归率**（Regression Rate）衡量 Agent 在修复目标问题的同时引入新问题的频率。在 SWE-bench 中，这通过 PASS_TO_PASS 测试检测。高回归率表明 Agent 缺乏对代码全局影响的理解，这是当前大模型在软件工程任务中的普遍局限。
 
 ### 4.2 性能指标
 
-| 指标 | 定义 | 测量方法 |
-|------|------|---------|
-| **端到端延迟** | 从输入到输出的总时间 | 时间戳差 |
-| **推理延迟** | LLM 生成时间 | API 返回时间 |
-| **工具执行延迟** | 工具调用耗时 | 工具 wrapper 计时 |
-| **首 token 延迟** | 第一个 token 返回时间 | Streaming API 计时 |
-| **吞吐量** | 单位时间完成任务数 | 任务数 / 时间 |
+性能指标关注 Agent 系统的执行效率，可进一步细分为时间效率和资源效率两个维度。
+
+**端到端延迟**（End-to-End Latency）是从任务提交到结果返回的总时间。AgentCgroup 的研究揭示了端到端延迟的构成：容器启动占 10-20%，Agent 初始化占 5-10%，LLM 推理占 20-40%，工具执行占 30-50%，后处理占 5% [4]。这一分解对于识别优化机会至关重要。
+
+**推理延迟**（Inference Latency）特指 LLM API 的响应时间，包括首 token 延迟（Time to First Token, TTFT）和完整生成时间。TTFT 对于交互式 Agent 体验尤为关键，因为它决定了用户感知到的"思考开始"时刻。
+
+**工具执行延迟**（Tool Execution Latency）衡量每次工具调用的耗时。在 SWE-bench 场景中，这包括文件读写、代码执行、测试运行等操作。AgentCgroup 发现工具执行占据了端到端延迟的最大份额（30-50%），且与内存 burst 高度相关 [4]。
+
+**吞吐量**（Throughput）定义为单位时间内完成的任务数。对于并发部署场景，吞吐量受限于最稀缺的资源（在 Agent 场景中通常是内存）。
 
 ### 4.3 资源指标
 
-| 指标 | 定义 | 测量方法 |
-|------|------|---------|
-| **CPU 使用率** |  CPU 时间占比 | `cpu.stat` / `top` |
-| **内存使用** |  RSS / Peak RSS | `memory.current` / `memory.peak` |
-| **内存峰均比** | 峰值 / 平均值 | 连续采样计算 |
-| **磁盘 I/O** | 读写带宽 | `iostat` / `blkio.throttle` |
-| **网络 I/O** | 收发带宽 | `eth0` 统计 |
+资源指标量化 Agent 系统对基础设施资源的消耗模式。
+
+**内存使用**是 Agent 工作负载中最关键的资源指标。AgentCgroup 的测量揭示了内存使用的两层结构：约 185 MB 的稳定基线（对应 Agent 框架和 LLM 推理的内存占用），以及工具调用触发的 500 MB - 4 GB 的 burst [4]。峰均比（Peak-to-Average Ratio）是衡量内存波动剧烈程度的关键指标，Agent 工作负载的 15.4× 远超 serverless（~1.5×）和微服务（2-3×）。
+
+**CPU 使用率**在 Agent 工作负载中相对较低（单核归一化后 Haiku 13.2%，GLM 7.6%），但 CPU 调度延迟（如容器切换、进程 fork）对端到端延迟有显著贡献。
+
+**磁盘 I/O**主要发生在容器镜像加载、代码仓库克隆和依赖安装阶段。SWE-bench 的 Docker 镜像大小（2.9-17.3 GB）对存储和 I/O 带宽提出了较高要求。
+
+**网络 I/O**包括 LLM API 调用、工具下载（如 pip install）、以及多 Agent 场景下的协调通信。对于使用云端 LLM API 的部署，网络延迟和带宽直接影响推理延迟。
 
 ### 4.4 成本指标
 
-| 指标 | 定义 | 测量方法 |
-|------|------|---------|
-| **Token 消耗** | 输入 + 输出 token 数 | API 返回或 tokenizer 计算 |
-| **API 成本** | 单次调用费用 | 单价 × token 数 |
-| **基础设施成本** | 计算资源费用 | 云厂商计费 |
-| **单次任务成本** | 完整任务总费用 | 汇总所有调用 |
+成本指标将技术资源消耗转化为经济成本，对于商业部署决策至关重要。
 
-### 4.5 多维度评分卡
+**Token 消耗**是 LLM API 计费的基本单位，分为输入 token（prompt）和输出 token（completion）。不同模型的定价差异显著（如 GPT-4 输入 $0.03/1K tokens，Claude Haiku 输入 $0.00025/1K tokens），模型选择对成本有数量级的影响。
 
-```
-┌─────────────────────────────────────────────────┐
-│           Agent 性能评分卡                        │
-├─────────────────────────────────────────────────┤
-│  功能正确性    ████████░░  80%  (Resolved)      │
-│  执行效率      ██████░░░░  60%  (延迟 < 阈值)    │
-│  资源效率      █████░░░░░  50%  (内存优化空间)    │
-│  成本效益      ███████░░░  70%  (Token 效率)     │
-│  稳定性        ████████░░  80%  (错误率 < 5%)    │
-├─────────────────────────────────────────────────┤
-│  综合评分      ███████░░░  68%                  │
-└─────────────────────────────────────────────────┘
-```
+**API 成本**是单次 LLM 调用的直接费用。对于多轮推理 Agent（如 Reflexion），API 成本可能累积至单次调用的数十倍甚至上百倍 [8]。
+
+**基础设施成本**包括计算实例、存储、网络等云资源的费用。Agent 工作负载的内存主导特征意味着内存优化（如选择适当的实例规格、实施内存超售策略）对成本控制至关重要。
+
+**单次任务成本**是完成一个完整任务的总费用，包括所有 LLM 调用、工具执行和基础设施开销。这是评估 Agent 系统商业可行性的最终指标。
 
 ---
 
@@ -243,71 +266,95 @@ SWE-ReBench 提出的核心问题：
 
 ### 5.1 负载特征概述
 
-AI Agent 工作负载与传统工作负载有本质区别：
+AI Agent 工作负载在资源使用模式、可预测性和状态管理等方面与传统工作负载存在本质差异。理解这些差异是设计合适的负载分析和资源管理策略的前提。
 
-| 特征 | 传统工作负载 | AI Agent 工作负载 |
-|------|------------|------------------|
-| **执行模式** | 持续运行 | Burst-Silence 交替 |
-| **资源需求** | 相对平稳 | 剧烈波动 |
-| **可预测性** | 历史可预测 | 非确定性 |
-| **状态管理** | 无状态或可丢弃 | 有状态（LLM 上下文） |
-| **错误处理** | 重启即可 | 重启丢失上下文 |
-| **粒度** | 进程级 | 工具调用级 |
+**执行模式：Burst-Silence 交替**
 
-### 5.2 关键负载特征
+传统工作负载（如 Web 服务、数据库）通常呈现持续运行的特征，资源使用相对平稳。AI Agent 工作负载则呈现出鲜明的"爆发-静默"交替模式：在 LLM 推理阶段，资源消耗相对稳定（基线内存约 185 MB，CPU 利用率较低）；在工具调用阶段，资源使用突然爆发（内存飙升至数 GB，CPU 利用率上升），随后迅速回落 [4]。
 
-**1. Burst-Silence 模式**
+这种模式的形成机制在于：LLM 推理是计算密集型但内存相对稳定的操作（模型权重已加载，主要内存消耗来自激活值和 KV cache）；而工具调用（如执行测试、编译代码、安装依赖）涉及大量外部进程创建、文件 I/O 和内存分配，导致资源需求的急剧波动。
 
-```
-内存使用
-  │
-4GB├                    ╱╲
-  │                   ╱  ╲
-  │    ╱╲            ╱    ╲
-2GB├───╱  ╲──────────╱      ╲─────
-  │  ╱    ╲        ╱        ╲
-1GB├─╱      ╲──────╱          ╲───
-  │╱        ╲    ╱
-  ├──────────╲──╱──────────────────
-  │  推理    工具   推理    工具
-  └─────────────────────────────────→ 时间
-```
+**资源需求：剧烈波动**
 
-- 98.5% 的内存 burst 发生在工具调用期间
-- 工具调用仅占 50.6% 的执行时间
-- Burst 持续 1-2 秒，变化率可达 3GB/s
+Agent 工作负载的资源波动幅度远超传统工作负载。AgentCgroup 测量的内存峰均比为 15.4×，而 serverless 工作负载约为 1.5×，微服务为 2-3×，批处理为 5-10× [4]。这种极端波动对资源调度提出了严峻挑战：静态资源分配（如固定内存限制）要么导致资源浪费（分配过多），要么导致 OOM 杀死（分配不足）。
 
-**2. 内存主导瓶颈**
+**可预测性：低**
 
-| 模型 | 平均 CPU | 基线内存 | Burst 内存 | 峰均比 |
-|------|---------|---------|-----------|--------|
-| Haiku | 13.2% | 185 MB | 500 MB - 4 GB | 15.4× |
-| GLM | 7.6% | 185 MB | 500 MB - 4 GB | 15.4× |
+同任务多次运行的资源曲线方差达 1.8×，不同任务间差异可达 20× [4]。这种高度不可预测性源于 LLM 的非确定性输出：即使给定相同的任务描述，不同运行中 LLM 可能选择不同的解决策略、调用不同的工具序列，从而导致截然不同的资源消耗模式。
 
-**3. 非确定性**
+**状态管理：有状态**
 
-- 同任务多次运行：1.8× 方差
-- 不同任务间：20× 峰值内存差异
-- 不同模型：资源曲线完全不同
+与传统无状态工作负载不同，Agent 系统是有状态的——LLM 的上下文窗口累积了任务执行的历史信息，重启 Agent 意味着丢失这些累积的上下文。这使得传统的"杀死-重启"容错策略不再适用：OOM 杀死不仅中断当前任务，还可能导致已累积的推理成果丢失 [4]。
 
-### 5.3 与传统工作负载对比
+### 5.2 关键负载特征详解
 
-| 工作负载类型 | 峰均比 | 可预测性 | 状态敏感度 |
-|-----------|--------|---------|-----------|
-| **Serverless** | ~1.5× | 中 | 低 |
-| **Microservice** | 2-3× | 高 | 中 |
-| **Batch** | 5-10× | 高 | 低 |
-| **AI Agent** | **15.4×** | **低** | **高** |
+**Burst-Silence 模式的量化特征**
+
+AgentCgroup 论文对 Burst-Silence 模式进行了详细的量化分析 [4]：
+
+- 98.5% 的内存 burst 事件与工具调用直接相关
+- 工具调用仅占 50.6% 的执行时间，但贡献了绝大部分资源波动
+- Burst 持续时间通常为 1-2 秒
+- 内存变化率可达 3 GB/s（即 1 秒内内存使用增加或减少 3 GB）
+
+这种模式对监控系统的采样频率提出了严格要求。如果采样频率低于 burst 持续时间（如每 5 秒采样一次），将可能完全错过 burst 峰值，导致对资源需求的严重低估。AgentCgroup 推荐采样频率至少为 1 Hz（每秒一次），对于精确分析则建议 10 Hz 或更高 [4]。
+
+**内存主导瓶颈的形成机制**
+
+为什么内存而非 CPU 成为 Agent 工作负载的并发瓶颈？AgentCgroup 的分析揭示了以下机制 [4]：
+
+首先，LLM 推理的 CPU 利用率本身就不高。以 Claude Haiku 为例，单核归一化后的平均 CPU 利用率仅为 13.2%。这是因为 LLM 推理主要受限于内存带宽（加载模型权重和 KV cache）而非计算能力，而内存带宽的利用率在系统监控中不直接体现为 CPU 利用率。
+
+其次，工具调用阶段的 CPU 需求虽然上升，但通常是短暂的（1-2 秒），且与内存 burst 同步发生。由于内存 burst 的幅度（数百 MB 到数 GB）远大于 CPU 需求的增量，内存成为限制并发数量的首要因素。
+
+最后，容器镜像的大小（2.9-17.3 GB）进一步加剧了内存压力。每个并发任务需要一个独立的容器环境，镜像加载本身就需要大量内存。
+
+**非确定性的来源与影响**
+
+Agent 工作负载的非确定性来源于多个层面 [4]：
+
+- **LLM 输出的随机性**：即使 temperature=0，不同运行中模型的输出也可能不同，因为工具调用的结果（如文件内容、测试输出）会反馈到后续推理中，形成蝴蝶效应。
+- **环境状态的差异**：容器启动时间、网络延迟、文件系统缓存状态等环境因素引入额外变异。
+- **工具行为的变异**：外部工具（如编译器、测试框架）的执行时间可能因系统负载而异。
+
+这种非确定性的直接影响是：基于历史数据的预测模型难以准确预估未来资源需求。传统的自动扩缩容策略（基于历史负载预测）在 Agent 场景中效果有限，需要转向实时响应和自适应策略。
+
+### 5.3 与传统工作负载的对比分析
+
+将 AI Agent 工作负载与传统云计算工作负载进行系统对比，有助于识别现有基础设施的适配差距：
+
+| 维度 | Serverless | Microservice | Batch | AI Agent |
+|------|-----------|-------------|-------|---------|
+| **峰均比** | ~1.5× | 2-3× | 5-10× | **15.4×** |
+| **可预测性** | 中 | 高 | 高 | **低** |
+| **状态敏感度** | 低 | 中 | 低 | **高** |
+| **执行粒度** | 函数级 | 服务级 | 作业级 | **工具调用级** |
+| **典型延迟** | 毫秒-秒 | 毫秒-秒 | 分钟-小时 | **分钟-小时** |
+| **容错策略** | 重试 | 重试/降级 | 重试 | **保护上下文** |
+
+Serverless 架构的峰均比最低，因为其设计目标就是处理短暂、无状态的函数调用。微服务的资源使用相对可预测，因为服务实例通常运行稳定的工作负载。批处理工作负载虽然峰均比较高，但执行时间窗口明确，资源需求可提前规划。AI Agent 在所有维度上都呈现出极端特征，现有云计算基础设施并未针对这些特征进行优化 [4]。
 
 ### 5.4 三大不匹配问题
 
-AgentCgroup 论文识别的核心问题：
+AgentCgroup 论文系统性地识别了现有资源控制机制与 Agent 工作负载之间的三大不匹配 [4]：
 
-| 不匹配 | 问题描述 | 传统方法 | Agent 现实 |
-|--------|---------|---------|-----------|
-| **粒度不匹配** | 容器级策略 vs 工具调用级动态 | 每个容器一个策略 | 每次工具调用资源不同 |
-| **响应性不匹配** | 用户空间反应太慢 | 毫秒到分钟级 | 亚秒级不可预测 burst |
-| **适应性不匹配** | 基于历史的预测失效 | 杀死重启可接受 | 破坏累积的 LLM 上下文 |
+**粒度不匹配（Granularity Mismatch）**
+
+现有资源控制通常在容器或进程级别实施策略（如 Docker 的 `--memory` 限制、Kubernetes 的 resource requests/limits）。然而，Agent 工作负载的资源动态发生在工具调用级别——一次工具调用可能触发数 GB 的内存 burst，而两次工具调用之间资源需求可能回落至基线。容器级策略无法区分这些不同阶段，导致要么过度分配（浪费资源），要么在 burst 期间触发 OOM（杀死 Agent）。
+
+AgentCgroup 提出的解决方案是建立与工具调用边界对齐的分层 cgroup 结构，允许为不同工具调用阶段设置差异化的资源策略 [4]。
+
+**响应性不匹配（Responsiveness Mismatch）**
+
+传统资源控制系统（如 Kubernetes 的 Vertical Pod Autoscaler）在用户空间运行，响应时间在毫秒到分钟级别。然而，Agent 工作负载的 burst 持续时间仅为 1-2 秒，变化率可达 3 GB/s。当用户空间监控系统检测到资源紧张并尝试调整时，burst 可能已经结束（导致调整滞后）或已经触发了 OOM（导致调整无效）。
+
+AgentCgroup 主张将资源控制逻辑下沉到内核空间，利用 eBPF 和 `sched_ext` 实现微秒级的响应 [4]。
+
+**适应性不匹配（Adaptability Mismatch）**
+
+传统工作负载管理通常依赖基于历史数据的预测模型（如时间序列分析、机器学习预测）来预估未来资源需求。然而，Agent 工作负载的高度非确定性（同任务 1.8× 方差，跨任务 20× 差异）使得历史预测基本失效。更根本的是，传统系统的容错策略（如杀死并重启进程）在 Agent 场景中不可接受，因为这会丢失 LLM 累积的上下文。
+
+AgentCgroup 提出了一种"意图驱动"的适应策略：利用 Agent 声明资源需求的能力（如在执行工具调用前预估所需内存），结合运行时自适应策略实现资源的动态调整，而非依赖历史预测 [4]。
 
 ---
 
@@ -315,420 +362,83 @@ AgentCgroup 论文识别的核心问题：
 
 ### 6.1 负载选择策略
 
-**选择原则：**
+负载选择是负载分析的基础，直接决定分析结果的代表性和可信度。在 SWE-bench 系列基准的语境下，负载选择需要平衡多个目标：
 
-1. **代表性**：覆盖不同复杂度、不同领域
-2. **可扩展性**：支持从小规模到大规模
-3. **可重复性**：固定种子，多次运行取平均
-4. **多样性**：包含成功、失败、边界案例
+**代表性**：选择的任务应覆盖不同复杂度、不同领域和不同类型的软件缺陷。SWE-bench 涵盖的 12 个 Python 项目（如 sympy、django、matplotlib、scikit-learn、pytest 等）代表了数值计算、Web 框架、可视化、机器学习、测试框架等不同领域 [1]。在进行资源分析时，应确保样本覆盖这些不同领域，因为不同领域的代码结构和测试模式可能导致显著不同的资源消耗特征。
 
-**SWE-bench 任务选择方法：**
+**可扩展性**：负载选择应支持从小规模验证到大规模统计分析的平滑扩展。AgentCgroup 论文采用了分层采样策略：从 21,000+ 的 SWE-ReBench 任务池中，先按项目类别分组，再在每个类别内按难度分层，最终选取 144 个任务进行详细测量 [4]。这种策略既保证了样本的代表性，又控制了测量成本。
 
-```python
-# 论文中的 18 任务选择（6 类别 × 3 难度）
-task_categories = {
-    "sympy": ["sympy__sympy-11232", "sympy__sympy-12419", "sympy__sympy-13480"],
-    "django": ["django__django-10087", "django__django-11011", "django__django-12209"],
-    "matplotlib": ["matplotlib__matplotlib-22232", "matplotlib__matplotlib-23314", "matplotlib__matplotlib-24149"],
-    "scikit": ["scikit__scikit-10297", "scikit__scikit-12471", "scikit__scikit-13142"],
-    "pytest": ["pytest__pytest-5631", "pytest__pytest-6197", "pytest__pytest-7356"],
-    "httpx": ["encode__httpx-2701", "encode__httpx-852", "encode__httpx-1182"]
-}
-```
+**可重复性**：负载分析的结果应能够被独立复现。这要求明确记录任务选择标准、随机种子、运行环境等元数据。SWE-ReBench 提供了标准化的 Docker 镜像和 HuggingFace 数据集，为结果复现提供了基础 [2]。
 
-**分层采样策略：**
+**多样性**：样本应包含成功、失败和边界案例。仅分析成功案例可能高估系统性能，仅分析失败案例则可能低估。AgentCgroup 的 144 个任务中，既包含 Agent 成功修复的案例，也包含失败的案例，从而能够分析不同结果对应的资源消耗差异 [4]。
 
-| 层级 | 采样目的 | 任务数 |
-|------|---------|--------|
-|  smoke test | 快速验证 | 1-2 |
-|  回归测试 | 防止退化 | 10-20 |
-|  性能基准 | 资源分析 | 50-100 |
-|  全量测试 | 完整评估 | 300+ |
+### 6.2 监测指标体系设计
 
-### 6.2 监测指标体系
+基于前文分析的 Agent 工作负载特征，监测指标体系应覆盖时间、资源、工具和成本四个维度：
 
-**端到端延迟分解：**
+**时间维度**：端到端延迟的分解是理解性能瓶颈的关键。AgentCgroup 的测量框架将总延迟分解为容器启动、Agent 初始化、LLM 推理、工具执行和后处理五个阶段 [4]。这种分解揭示了反直觉的发现：LLM 推理仅占 26-44%，而工具执行占 30-50%。在实践中，建议在每个阶段的入口和出口插入时间戳，通过差值计算各阶段耗时。
 
-```
-总延迟 = 容器启动 + Agent 初始化 + 推理时间 + 工具执行 + 后处理
-        │           │            │          │          │
-        │           │            │          │          └─ 5%
-        │           │            │          └─ 30-50% (工具调用)
-        │           │            └─ 20-40% (LLM 推理)
-        │           └─ 5-10% (Agent 框架)
-        └─ 10-20% (容器冷启动)
-```
+**资源维度**：鉴于 Agent 工作负载的 Burst-Silence 特征，资源监测的采样频率至关重要。AgentCgroup 推荐至少 1 Hz 的采样频率以捕获 burst 事件，对于精确分析则建议 10 Hz [4]。监测指标应包括：
 
-**资源监测维度：**
+- 内存：`memory.current`（当前使用）、`memory.peak`（峰值使用）、`memory.swap.current`（交换区使用）
+- CPU：`cpu.stat` 中的 `usage_usec`（用户态时间）、`system_usec`（内核态时间）
+- 磁盘：IOPS 和带宽，特别关注容器镜像加载和依赖安装阶段
+- 网络：带宽和连接数，特别关注 LLM API 调用
 
-| 维度 | 指标 | 采样频率 | 工具 |
-|------|------|---------|------|
-| **时间** | 各阶段延迟 | 事件驱动 | 应用内计时 |
-| **CPU** | 使用率、调度延迟 | 1-10 Hz | `cpu.stat`, `perf` |
-| **内存** | RSS、Peak、Swap | >= 1 Hz | `memory.current`, `memory.peak` |
-| **磁盘** | IOPS、带宽 | 1 Hz | `iostat`, `blkio` |
-| **网络** | 带宽、延迟 | 1 Hz | `ss`, `nstat` |
-| **工具** | 调用次数、耗时 | 事件驱动 | Agent trace |
-| **Token** | 输入/输出数量 | 每次调用 | API 返回 |
+**工具维度**：工具调用是 Agent 工作负载的核心特征，也是资源 burst 的主要来源。监测应记录每次工具调用的类型（如 Bash、Read、Edit、Task）、参数、返回值、耗时和资源消耗。这种细粒度记录支持后续的工具调用模式分析，如识别频繁调用的工具、耗时最长的工具、导致 burst 的工具等。
 
-### 6.3 监测工具配置
+**成本维度**：Token 消耗是 LLM API 计费的基础，也是评估 Agent 经济可行性的关键指标。监测应区分输入 token 和输出 token，因为两者的定价通常不同。此外，还应追踪 API 调用次数、模型切换次数（如果使用多模型策略）和错误重试次数。
 
-**方案 1：Podman stats（论文使用）**
+### 6.3 监测工具与方法
 
-```bash
-# 1Hz 采样
-watch -n 1 podman stats --no-stream --format "{{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}"
+根据观测深度和精度要求，可选择不同的监测工具组合：
 
-# 输出到文件
-while true; do
-    podman stats --no-stream --format "json" >> stats.json
-    sleep 1
-done
-```
+**容器级监测**：`podman stats` 或 `docker stats` 提供了容器级别的资源使用概览，适合快速检查和告警。但其精度受限于命令执行间隔，可能错过短暂的 burst 事件。
 
-**方案 2：cgroup v2 直接读取（更精确）**
+**cgroup v2 直接读取**：通过读取 `/sys/fs/cgroup/.../memory.current` 等文件，可以获得内核记录的资源使用数据，精度更高、开销更低。这是 AgentCgroup 论文采用的主要监测方法 [4]。
 
-```bash
-# 内存
-CONTAINER_ID="your-container-id"
-echo "timestamp,memory.current,memory.peak,memory.swap.current"
-while true; do
-    TS=$(date +%s.%N)
-    MEM=$(cat /sys/fs/cgroup/machine.slice/libpod-$CONTAINER_ID.scope/memory.current)
-    PEAK=$(cat /sys/fs/cgroup/machine.slice/libpod-$CONTAINER_ID.scope/memory.peak 2>/dev/null || echo 0)
-    SWAP=$(cat /sys/fs/cgroup/machine.slice/libpod-$CONTAINER_ID.scope/memory.swap.current)
-    echo "$TS,$MEM,$PEAK,$SWAP"
-    sleep 1
-done > memory.csv
-```
+**eBPF 追踪**：对于需要理解资源消耗与系统调用、进程创建等事件关联关系的场景，eBPF 提供了最强大的能力。AgentSight 利用 eBPF 实现了从语义意图到系统动作的关联追踪 [6]。
 
-**方案 3：eBPF 高级追踪（AgentSight 风格）**
+**应用内追踪**：在 Agent 框架内部插入追踪代码，记录 LLM 调用、工具调用、状态转换等事件。这种追踪提供了最高层的语义信息，但需要 Agent 框架的支持。
 
-```bash
-# 使用 bpftrace 追踪系统调用
-bpftrace -e '
-tracepoint:syscalls:sys_enter_execve {
-    printf("execve: pid=%d, comm=%s, arg=%s\n", pid, comm, str(args->argv[0]));
-}
+在实践中，建议采用多层监测的组合策略：应用内追踪捕获语义事件，cgroup v2 读取捕获资源使用，eBPF 追踪捕获系统级细节。通过时间戳关联不同层次的数据，可以建立从语义操作到资源消耗的完整因果链。
 
-tracepoint:syscalls:sys_enter_clone {
-    printf("clone: pid=%d, comm=%s\n", pid, comm);
-}
-'
-```
+### 6.4 数据分析方法
 
-**方案 4：综合监控脚本**
+采集到的监测数据需要经过系统分析才能提取有价值的洞察。
 
-```python
-#!/usr/bin/env python3
-"""Agent 资源监控器"""
+**时序分析**：资源使用数据本质上是时间序列。通过绘制内存、CPU 等资源使用随时间变化的曲线，可以直观识别 Burst-Silence 模式。关键分析包括：基线水平（资源使用的稳定下限）、峰值水平（burst 的最大值）、burst 频率（单位时间内 burst 事件的数量）、burst 持续时间等。
 
-import time
-import json
-import subprocess
-from datetime import datetime
-from pathlib import Path
+**相关性分析**：分析不同指标之间的关联关系。例如，内存 burst 是否与特定工具调用类型相关？CPU 使用率与 LLM 推理延迟是否存在关联？这些相关性分析有助于识别资源消耗的根因。
 
-class AgentMonitor:
-    def __init__(self, container_id: str, output_dir: str = "./metrics"):
-        self.container_id = container_id
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True)
-        self.samples = []
-        
-    def sample(self) -> dict:
-        """采集一次资源样本"""
-        ts = time.time()
-        
-        # Podman stats
-        result = subprocess.run(
-            ["podman", "stats", "--no-stream", "--format", "json", self.container_id],
-            capture_output=True, text=True
-        )
-        stats = json.loads(result.stdout)[0] if result.stdout else {}
-        
-        # cgroup v2 直接读取（更精确）
-        cgroup_path = f"/sys/fs/cgroup/machine.slice/libpod-{self.container_id}.scope"
-        
-        sample = {
-            "timestamp": ts,
-            "datetime": datetime.now().isoformat(),
-            "memory": {
-                "current": self._read_cgroup(f"{cgroup_path}/memory.current"),
-                "peak": self._read_cgroup(f"{cgroup_path}/memory.peak"),
-                "swap": self._read_cgroup(f"{cgroup_path}/memory.swap.current"),
-            },
-            "cpu": {
-                "usage": self._read_cgroup(f"{cgroup_path}/cpu.stat"),
-            },
-            "podman_stats": stats
-        }
-        
-        self.samples.append(sample)
-        return sample
-    
-    def _read_cgroup(self, path: str) -> int:
-        try:
-            with open(path) as f:
-                return int(f.read().strip())
-        except:
-            return 0
-    
-    def run(self, interval: float = 1.0, duration: float = None):
-        """持续监控"""
-        start = time.time()
-        try:
-            while True:
-                self.sample()
-                if duration and (time.time() - start) >= duration:
-                    break
-                time.sleep(interval)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            self.save()
-    
-    def save(self):
-        """保存到文件"""
-        output_file = self.output_dir / f"metrics_{int(time.time())}.jsonl"
-        with open(output_file, "w") as f:
-            for sample in self.samples:
-                f.write(json.dumps(sample) + "\n")
-        print(f"Saved {len(self.samples)} samples to {output_file}")
+**统计分布分析**：由于 Agent 工作负载的高度非确定性，单次测量的结果可能不具有代表性。建议对每个任务进行多次重复运行（AgentCgroup 采用 3-5 次 [4]），分析指标的统计分布（均值、中位数、标准差、百分位数），而非仅报告单次结果。
 
-if __name__ == "__main__":
-    import sys
-    monitor = AgentMonitor(sys.argv[1])
-    monitor.run(interval=1.0)
-```
-
-### 6.4 Token 消耗监测
-
-**API 级别追踪：**
-
-```python
-import functools
-import time
-
-class TokenTracker:
-    def __init__(self):
-        self.calls = []
-    
-    def track(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            start = time.time()
-            result = func(*args, **kwargs)
-            latency = time.time() - start
-            
-            # 从 API 响应中提取 token 信息
-            usage = result.get("usage", {})
-            self.calls.append({
-                "timestamp": start,
-                "model": result.get("model", "unknown"),
-                "prompt_tokens": usage.get("prompt_tokens", 0),
-                "completion_tokens": usage.get("completion_tokens", 0),
-                "total_tokens": usage.get("total_tokens", 0),
-                "latency_ms": latency * 1000,
-                "cost_usd": self._calculate_cost(usage, result.get("model"))
-            })
-            return result
-        return wrapper
-    
-    def _calculate_cost(self, usage: dict, model: str) -> float:
-        # 基于 OpenAI/Anthropic 定价
-        pricing = {
-            "gpt-4": {"input": 0.03, "output": 0.06},
-            "claude-3-haiku": {"input": 0.00025, "output": 0.00125},
-        }
-        p = pricing.get(model, {"input": 0, "output": 0})
-        return (usage.get("prompt_tokens", 0) * p["input"] + 
-                usage.get("completion_tokens", 0) * p["output"]) / 1000
-    
-    def summary(self) -> dict:
-        total_calls = len(self.calls)
-        total_tokens = sum(c["total_tokens"] for c in self.calls)
-        total_cost = sum(c["cost_usd"] for c in self.calls)
-        avg_latency = sum(c["latency_ms"] for c in self.calls) / total_calls if total_calls else 0
-        
-        return {
-            "total_calls": total_calls,
-            "total_tokens": total_tokens,
-            "total_cost_usd": total_cost,
-            "avg_latency_ms": avg_latency,
-            "tokens_per_call": total_tokens / total_calls if total_calls else 0
-        }
-```
-
-### 6.5 数据分析方法
-
-**时序分析：**
-
-```python
-import pandas as pd
-import numpy as np
-
-def analyze_resource_trace(metrics_file: str) -> dict:
-    """分析资源追踪数据"""
-    df = pd.read_json(metrics_file, lines=True)
-    
-    # 内存分析
-    mem_current = df["memory.current"] / (1024**2)  # MB
-    
-    analysis = {
-        "memory": {
-            "baseline_mb": mem_current.quantile(0.1),  # 10% 分位数作为基线
-            "peak_mb": mem_current.max(),
-            "mean_mb": mem_current.mean(),
-            "peak_to_mean_ratio": mem_current.max() / mem_current.mean(),
-            "burst_count": len(find_bursts(mem_current)),
-        },
-        "latency": {
-            "total_duration_s": df["timestamp"].max() - df["timestamp"].min(),
-        }
-    }
-    
-    return analysis
-
-def find_bursts(series: pd.Series, threshold_std: float = 2.0) -> list:
-    """识别 burst 事件"""
-    mean = series.mean()
-    std = series.std()
-    threshold = mean + threshold_std * std
-    
-    bursts = []
-    in_burst = False
-    burst_start = None
-    
-    for idx, value in series.items():
-        if value > threshold and not in_burst:
-            in_burst = True
-            burst_start = idx
-        elif value <= threshold and in_burst:
-            in_burst = False
-            bursts.append({
-                "start": burst_start,
-                "end": idx,
-                "duration": idx - burst_start,
-                "peak": series[burst_start:idx].max()
-            })
-    
-    return bursts
-```
+**对比分析**：对比不同模型、不同任务类型、不同配置下的资源消耗差异。例如，Claude Haiku 与 GLM 的资源曲线有何不同？简单任务与复杂任务的峰均比是否存在显著差异？这些对比分析有助于识别优化机会和最佳实践。
 
 ---
 
-## 七、工具与资源汇总
+## 七、参考文献
 
-### 7.1 开源工具
+[1] Jimenez C E, Yang J, Wettig A, et al. SWE-bench: Can language models resolve real-world github issues?[C]//The Twelfth International Conference on Learning Representations. 2024.
 
-| 工具 | 用途 | 链接 |
-|------|------|------|
-| **SWE-bench** | 代码修复基准测试 | https://github.com/swe-bench/SWE-bench |
-| **SWE-ReBench** | 去污染增强版 | https://github.com/nebius/SWE-rebench |
-| **AgentSight** | eBPF 系统级观测 | https://github.com/eunomia-bpf/agentsight |
-| **AgentCgroup** | eBPF 资源控制 | https://github.com/eunomia-bpf/agentcgroup |
-| **AgentLedger** | 成本追踪 | https://github.com/WDZ-Dev/agent-ledger |
-| **bpftrace** | eBPF 追踪 | https://github.com/iovisor/bpftrace |
-| **Helicone** | LLM 可观测性 | https://github.com/Helicone/helicone |
-| **Langfuse** | 开源 LLM 追踪 | https://github.com/langfuse/langfuse |
+[2] Badertdinov A, Gerasimov A, Zinkevich S, et al. SWE-rebench: An automated pipeline for task collection and decontaminated evaluation of software engineering agents[J]. arXiv preprint arXiv:2505.20411, 2025.
 
-### 7.2 商业工具
+[3] Yang J, Jimenez C E, Wettig A, et al. SWE-bench+: Enhanced coding benchmark for llms[J]. arXiv preprint arXiv:2410.06992, 2024.
 
-| 工具 | 特点 | 定价 |
-|------|------|------|
-| **LangSmith** | LangChain 原生 | $39/seat/月 |
-| **AgentOps** | 生命周期监控 | 按量计费 |
-| **Datadog** | 全栈可观测性 | $8-12/10K 请求 |
-| **Arize AI** | ML 可观测性 | 企业定制 |
+[4] Zheng Y, et al. AgentCgroup: Understanding and controlling OS resources of AI agents[C]//Proceedings of the 1st Workshop on Operating Systems Design for AI Agents (AgenticOS), co-located with ASPLOS 2026. 2026.
 
-### 7.3 关键论文
+[5] Helicone. LLM observability platform[EB/OL]. https://github.com/Helicone/helicone, 2024-2026.
 
-| 论文 | 作者 | 年份 | 核心贡献 |
-|------|------|------|---------|
-| AgentCgroup: Understanding and Controlling OS Resources of AI Agents | Zheng et al. | 2026 | 首次系统表征 Agent OS 资源动态 |
-| AgentSight: System-Level Observability for AI Agents Using eBPF | Cardoz et al. | 2025 | eBPF 边界追踪 |
-| The Cost of Dynamic Reasoning | - | 2025 | Agent 能耗分析 |
-| SWE-bench: Can Language Models Resolve Real-World GitHub Issues? | Jimenez et al. | 2023 | 首个代码修复基准 |
-| SWE-rebench: Automated Pipeline for Decontaminated Evaluation | Badertdinov et al. | 2025 | 去污染评测 |
+[6] Cardoz S, et al. AgentSight: System-level observability for AI agents using eBPF[C]//SREday 2026 Hyderabad. 2026. arXiv preprint arXiv:2508.02736, 2025.
 
-### 7.4 快速参考：监控命令速查
+[7] Liu X, Yu H, Zhang H, et al. AgentBench: Evaluating LLMs as agents[C]//The Twelfth International Conference on Learning Representations. 2024.
 
-```bash
-# 容器资源监控
-podman stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"
+[8] The cost of dynamic reasoning: Demystifying AI agents' energy and latency footprints[J]. arXiv preprint arXiv:2506.04301, 2025.
 
-# cgroup v2 内存
-cat /sys/fs/cgroup/$CGROUP_PATH/memory.current
-cat /sys/fs/cgroup/$CGROUP_PATH/memory.peak
-cat /sys/fs/cgroup/$CGROUP_PATH/memory.stat
+[9] Zhou S, et al. SWE-bench++: A framework for the scalable generation of software engineering benchmarks from open-source repositories[J]. arXiv preprint arXiv:2512.17419, 2025.
 
-# cgroup v2 CPU
-cat /sys/fs/cgroup/$CGROUP_PATH/cpu.stat
-
-# 进程级监控
-pidstat -r -u -p $PID 1
-
-# eBPF 系统调用追踪
-bpftrace -e 'tracepoint:syscalls:sys_enter_execve { printf("%s\n", str(args->argv[0])); }'
-
-# 网络连接
-ss -tanp | grep $PID
-
-# 磁盘 I/O
-iotop -p $PID
-```
+[10] Yang J, et al. SWE-agent: Agent-computer interfaces enable automated software engineering[C]//Advances in Neural Information Processing Systems. 2024.
 
 ---
 
-## 附录：实验设计模板
-
-### A.1 单任务资源分析实验
-
-```yaml
-experiment:
-  name: "swe-bench-single-task-resource-analysis"
-  task: "sympy__sympy-11232"
-  model: "claude-3-haiku"
-  
-  monitoring:
-    sample_rate_hz: 1
-    metrics:
-      - memory.current
-      - memory.peak
-      - cpu.usage
-      - disk.io
-      - network.io
-      - tool_calls
-      - token_usage
-  
-  repetitions: 5
-  
-  analysis:
-    - baseline_memory
-    - peak_memory
-    - burst_patterns
-    - latency_breakdown
-    - token_efficiency
-```
-
-### A.2 多租户并发实验
-
-```yaml
-experiment:
-  name: "multi-tenant-concurrency-test"
-  tasks: ["task1", "task2", "task3"]
-  concurrency_levels: [1, 2, 4, 8]
-  
-  metrics:
-    - throughput_tasks_per_minute
-    - p50_latency
-    - p95_latency
-    - p99_latency
-    - memory_contention_ratio
-    - oom_events
-```
-
----
-
-*本文档基于 AgenticOS 知识库中的 SWE-bench、SWE-ReBench、AgentCgroup、AgentSight 等资料整理，持续更新中。*
+*本文档基于 AgenticOS 知识库中的研究资料整理，持续更新中。所有引用数据均来自已发表的学术论文或官方技术文档，未标注来源的数据为作者基于公开信息的合理推断。*
