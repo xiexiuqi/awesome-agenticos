@@ -18,24 +18,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 知识库结构
 
 ```
-AI Agent/
-└── Agentic OS/
-    ├── Agentic OS - The 1st Workshop on Operating Systems Design for AI Agents.md
-    ├── papers/
-    │   ├── 2025-AI-Agent-Index.pdf
-    │   └── AgenticOS2026/
-    │       └── AgenticOS_2026_paper_10.pdf
-    └── Agent Workload/
-        ├── Benchmarks/
-        │   ├── SWE-bench.md
-        │   ├── SWE-rebench.md
-        │   ├── Muilt-swe-bench.md
-        │   ├── SWE-bench 本地测试部署指导手册.md
-        │   └── SWE-bench vs SWE-ReBench 分析与国内部署指南.md
-        └── AgenticOS2026/
-            ├── The 1st Workshop onOperating Systems Design for AI Agents 会议总结.md
-            ├── 2025 AI Agent 指数：部署型代理 AI 系统的技术与安全特性文档.md
-            └── AgentCgroup Understanding and Controlling OS Resources of AI Agents.md
+AgenticOS/
+├── Agentic OS - The 1st Workshop on Operating Systems Design for AI Agents.md
+├── Linux kernel 仓库国内镜像加速.md
+├── papers/
+│   ├── 2025-AI-Agent-Index.pdf
+│   └── AgenticOS2026/
+│       └── AgenticOS_2026_paper_10.pdf
+└── Agent Workload/
+    ├── Benchmarks/
+    │   ├── SWE-bench.md
+    │   ├── SWE-rebench.md
+    │   ├── Muilt-swe-bench.md
+    │   ├── SWE-bench 本地测试部署指导手册.md
+    │   └── SWE-bench vs SWE-ReBench 分析与国内部署指南.md
+    └── AgenticOS2026/
+        ├── The 1st Workshop onOperating Systems Design for AI Agents 会议总结.md
+        ├── 2025 AI Agent 指数：部署型代理 AI 系统的技术与安全特性文档.md
+        └── AgentCgroup Understanding and Controlling OS Resources of AI Agents.md
 ```
 
 ## Obsidian 配置
@@ -80,7 +80,7 @@ git push
 
 ## 编辑规范
 
-- 在 `AI Agent/Agentic OS/` 下的适当子目录中创建 Markdown 文件
+- 在 `AgenticOS/` 下的适当子目录中创建 Markdown 文件
 - 使用 `[[笔记名称]]` 语法链接到其他笔记——Obsidian 会在文件重命名时自动更新链接
 - 对于 PDF 附件，将其放在引用笔记的同一目录中，并使用 `![[文件名.pdf]]` 语法
 - 笔记主要使用**中文**，保留英文技术术语
